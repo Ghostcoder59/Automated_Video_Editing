@@ -26,4 +26,6 @@ backend/uploads/
 backend/output/
 backend/app.db
 backend/client_secrets.json
+backend-lite/client_secrets.json
+client_secrets.json
 backend/*.wav
