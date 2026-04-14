@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Connected!</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0f172a;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 2rem;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5);
+            max-width: 400px;
+        }
+        .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            color: #10b981;
+        }
+        h1 { margin: 0 0 0.5rem 0; font-size: 1.5rem; }
+        p { color: #94a3b8; font-size: 1rem; line-height: 1.5; }
+        .close-btn {
+            margin-top: 1.5rem;
+            background: #8b5cf6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">✅</div>
+        <h1>Successfully Connected!</h1>
+        <p>Your YouTube account has been linked to AutoEditor Pro.</p>
+        <p>You can now safely close this window and return to your results.</p>
+        <button class="close-btn" onclick="window.close()">Close Window</button>
+    </div>
+    <script>
+        // Auto-close after 5 seconds
+        setTimeout(() => {
+            window.close();
+        }, 5000);
+    </script>
+</body>
+</html>

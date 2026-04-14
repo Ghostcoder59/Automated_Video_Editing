@@ -1,0 +1,10 @@
+fastapi==0.110.0
+uvicorn==0.29.0
+python-dotenv==1.0.1
+pydantic==2.6.4
+python-multipart==0.0.9
+stripe==8.6.0
+yt-dlp==2024.3.10
+google-auth-oauthlib==1.2.0
+google-api-python-client==2.122.0
+supabase==2.3.6
