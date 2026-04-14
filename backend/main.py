@@ -37,6 +37,8 @@ from auth_db import (
     ensure_token_allowance,
     get_plan_catalog,
     set_subscription_plan,
+    upsert_video_job,
+    get_video_job,
 )
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
@@ -69,23 +71,15 @@ def _job_status_path(job_id: str) -> str:
 
 
 def _persist_job_state(job_id: str, payload: dict) -> None:
-    os.makedirs(_job_dir(job_id), exist_ok=True)
     safe_payload = dict(payload)
     safe_payload.pop("session_token", None)
     safe_payload["job_id"] = job_id
-    with open(_job_status_path(job_id), "w", encoding="utf-8") as status_file:
-        json.dump(safe_payload, status_file, ensure_ascii=False, indent=2)
+    upsert_video_job(job_id, safe_payload, safe_payload.get("owner_user_id"))
 
 
 def _load_persisted_job_state(job_id: str) -> dict | None:
-    status_path = _job_status_path(job_id)
-    if not os.path.exists(status_path):
-        return None
     try:
-        with open(status_path, "r", encoding="utf-8") as status_file:
-            data = json.load(status_file)
-            if isinstance(data, dict):
-                return data
+        return get_video_job(job_id)
     except Exception:
         logger.exception("Failed to load persisted job state for %s", job_id)
     return None
@@ -901,6 +895,18 @@ async def get_status(job_id: str, authorization: str | None = Header(default=Non
     if not job_state:
         logger.warning(f"[Status] Job {job_id} not found (not in memory or disk)")
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found (not processing)")
+
+    if job_id not in jobs and job_state.get("status") == "processing":
+        logger.warning(f"[Status] Job {job_id} recovered from DB but worker is gone; marking interrupted")
+        interrupted = dict(job_state)
+        interrupted.update({
+            "status": "error",
+            "stage": "failed",
+            "message": "Processing was interrupted because the backend restarted. Please resubmit the video.",
+            "error_detail": "Processing was interrupted because the backend restarted. Please resubmit the video.",
+        })
+        _persist_job_state(job_id, interrupted)
+        job_state = interrupted
     
     owner_id = job_state.get("owner_user_id")
     if owner_id not in (None, user["id"]):

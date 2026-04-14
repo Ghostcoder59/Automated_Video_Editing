@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import secrets
 import hashlib
@@ -267,6 +268,17 @@ def init_db() -> None:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS video_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    owner_user_id BIGINT,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
         else:
             conn.execute(
                 """
@@ -339,6 +351,17 @@ def init_db() -> None:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS video_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    owner_user_id INTEGER,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
         # SQLite migrations for older databases.
         if not _column_exists(conn, "users", "username"):
@@ -357,6 +380,20 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN trial_ends_at TEXT")
         if not _column_exists(conn, "users", "monthly_tokens_reset_at"):
             conn.execute("ALTER TABLE users ADD COLUMN monthly_tokens_reset_at TEXT DEFAULT ''")
+
+        if not _column_exists(conn, "video_jobs", "payload_json"):
+            # The table may not exist yet on older databases; create it before migrating columns.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS video_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    owner_user_id INTEGER,
+                    status TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
         if USING_POSTGRES:
             conn.execute(
@@ -411,6 +448,51 @@ def init_db() -> None:
             )
 
         conn.commit()
+
+
+def upsert_video_job(job_id: str, payload: dict, owner_user_id: int | None = None) -> None:
+    status = str(payload.get("status") or "processing")
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    with _connect() as conn:
+        if USING_POSTGRES:
+            conn.execute(
+                """
+                INSERT INTO video_jobs (job_id, payload_json, owner_user_id, status, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (job_id) DO UPDATE SET
+                    payload_json = EXCLUDED.payload_json,
+                    owner_user_id = EXCLUDED.owner_user_id,
+                    status = EXCLUDED.status,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                (job_id, payload_json, owner_user_id, status, _utc_now()),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO video_jobs (job_id, payload_json, owner_user_id, status, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    owner_user_id = excluded.owner_user_id,
+                    status = excluded.status,
+                    updated_at = excluded.updated_at
+                """,
+                (job_id, payload_json, owner_user_id, status, _utc_now()),
+            )
+        conn.commit()
+
+
+def get_video_job(job_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT payload_json FROM video_jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+    if not row:
+        return None
+    payload = json.loads(row["payload_json"])
+    return payload if isinstance(payload, dict) else None
 
 
 def _hash_password(password: str, salt: bytes) -> str:
