@@ -9,9 +9,6 @@ from scipy.io import wavfile
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 import moviepy.video.fx.all as vfx
 from datetime import timedelta
-import cv2
-from vision_engine import VisionEngine, SmoothingBuffer
-from transcription_engine import TranscriptionEngine
 
 # Load trained model
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "cheer_detector_rf.pkl")
@@ -118,7 +115,7 @@ def _resolve_ffmpeg_binary():
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def apply_action_track_crop(clip, vision_engine):
+def apply_action_track_crop(clip, vision_engine, smoothing_buffer_cls=None):
     """
     Applies smooth action tracking crop to a clip converting it to 9:16.
     """
@@ -129,7 +126,11 @@ def apply_action_track_crop(clip, vision_engine):
     target_ratio = 9/16
     target_w = int(h * target_ratio)
     
-    smooth_x = SmoothingBuffer(window_size=30)
+    if smoothing_buffer_cls is None:
+        # Fallback to center crop if smoothing dependency isn't available.
+        return clip.fx(vfx.crop, x_center=clip.w/2, y_center=clip.h/2, width=target_w, height=clip.h)
+
+    smooth_x = smoothing_buffer_cls(window_size=30)
     
     def process_frame(get_frame, t):
         frame = get_frame(t)
@@ -170,7 +171,7 @@ def apply_video_filter(clip, filter_type):
         
     return clip
 
-def cut_and_merge_clips(video_path, cheer_segments, output_dir, export_format="16:9", vision_engine=None, video_filter="none"):
+def cut_and_merge_clips(video_path, cheer_segments, output_dir, export_format="16:9", vision_engine=None, video_filter="none", smoothing_buffer_cls=None):
     video = VideoFileClip(video_path)
     cheer_clips = []
 
@@ -191,7 +192,7 @@ def cut_and_merge_clips(video_path, cheer_segments, output_dir, export_format="1
         
         if export_format == "9:16":
             # REUSE the shared vision engine (Turbo fix)
-            clip = apply_action_track_crop(clip, vision_engine)
+            clip = apply_action_track_crop(clip, vision_engine, smoothing_buffer_cls=smoothing_buffer_cls)
             
         # Apply the chosen Pro Filter
         clip = apply_video_filter(clip, video_filter)
@@ -214,10 +215,25 @@ def cut_and_merge_clips(video_path, cheer_segments, output_dir, export_format="1
 # Process video file (TURBO VERSION)
 def process_video(video_path, output_dir, segment_duration=2.0, cheer_threshold=0.6, use_ai=True, export_format="16:9", video_filter="none"):
     audio_path = os.path.join(output_dir, "extracted_audio.wav")
-    
-    # One-time initialization of engine instances
-    vision = VisionEngine() if use_ai else None
-    trans = TranscriptionEngine() if use_ai else None
+
+    cv2_mod = None
+    vision = None
+    trans = None
+    smoothing_buffer_cls = None
+
+    # Keep advanced AI modules optional so the API can boot on minimal environments.
+    if use_ai:
+        try:
+            import cv2 as cv2_mod
+            from vision_engine import VisionEngine, SmoothingBuffer
+            from transcription_engine import TranscriptionEngine
+
+            vision = VisionEngine()
+            trans = TranscriptionEngine()
+            smoothing_buffer_cls = SmoothingBuffer
+        except Exception as import_err:
+            print(f"AI modules unavailable, continuing with audio-only mode: {import_err}")
+            use_ai = False
     
     ffmpeg_binary = _resolve_ffmpeg_binary()
     try:
@@ -238,7 +254,7 @@ def process_video(video_path, output_dir, segment_duration=2.0, cheer_threshold=
     cheer_segments = []
 
     # Turbo optimization: Persistent Video Capture handle
-    cap = cv2.VideoCapture(video_path) if use_ai else None
+    cap = cv2_mod.VideoCapture(video_path) if use_ai and cv2_mod is not None else None
 
     # Process each segment
     for start_time in np.arange(0, total_duration, segment_duration):
@@ -259,7 +275,7 @@ def process_video(video_path, output_dir, segment_duration=2.0, cheer_threshold=
             if use_ai and audio_prob > 0.35:
                 # 1. Vision Check using persistent handle (Turbo)
                 if cap and cap.isOpened():
-                    cap.set(cv2.CAP_PROP_POS_MSEC, (start_time + end_time) / 2 * 1000)
+                    cap.set(cv2_mod.CAP_PROP_POS_MSEC, (start_time + end_time) / 2 * 1000)
                     ret, frame = cap.read()
                     if ret:
                         _, vision_score = vision.get_action_center(frame)
@@ -279,7 +295,13 @@ def process_video(video_path, output_dir, segment_duration=2.0, cheer_threshold=
 
     # Export with shared vision engine for tracking
     output_video_path, video_duration = cut_and_merge_clips(
-        video_path, cheer_segments, output_dir, export_format=export_format, vision_engine=vision, video_filter=video_filter
+        video_path,
+        cheer_segments,
+        output_dir,
+        export_format=export_format,
+        vision_engine=vision,
+        video_filter=video_filter,
+        smoothing_buffer_cls=smoothing_buffer_cls,
     )
     
     summary_text = build_video_summary(video_duration or total_duration, cheer_segments, cheer_threshold, segment_duration)
